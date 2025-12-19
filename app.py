@@ -1,78 +1,71 @@
-import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 
-# --- إعدادات الواجهة ---
-st.set_page_config(layout="wide", page_title="SMC Live Monitor")
-st.markdown("""
-    <style>
-    .main { background-color: #0e1117; }
-    .stMetric { background-color: #161b22; padding: 10px; border-radius: 10px; }
-    </style>
-    """, unsafe_allow_html=True)
+# 1. إعدادات الزوج والبيانات
+pair = "EURUSD=X" 
+data = yf.download(pair, period="5d", interval="15m")
 
-# --- شريط الإعدادات الجانبي ---
-st.sidebar.title("🛠 التحكم بالتحليل")
-pair = st.sidebar.selectbox("الزوج", ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "BTC-USD"], index=0)
-timeframe = st.sidebar.selectbox("الإطار الزمني", ["15m", "1h", "4h", "1d"], index=1)
-sensitivity = st.sidebar.slider("حساسية اكتشاف المناطق", 1, 10, 5)
+# 2. خوارزمية اكتشاف الهيكل (BOS) ومناطق SMC
+def get_smc_analysis(df):
+    df = df.copy()
+    # تحديد القمم والقيعان المحلية
+    df['Peak'] = (df['High'] > df['High'].shift(1)) & (df['High'] > df['High'].shift(-1))
+    df['Trough'] = (df['Low'] < df['Low'].shift(1)) & (df['Low'] < df['Low'].shift(-1))
+    
+    # تحديد مناطق العرض والطلب (أعلى قمة وأدنى قاع في الفترة الأخيرة)
+    top_zone = df['High'].rolling(window=20).max().iloc[-1]
+    bottom_zone = df['Low'].rolling(window=20).min().iloc[-1]
+    
+    return df, top_zone, bottom_zone
 
-# --- جلب البيانات ---
-@st.cache_data(ttl=60) # تحديث كل دقيقة
-def load_data(symbol, interval):
-    df = yf.download(symbol, period="5d", interval=interval)
-    return df
+df, top_z, bottom_z = get_smc_analysis(data)
+current_price = df['Close'].iloc[-1]
 
-data = load_data(pair, timeframe)
-
-# --- خوارزمية SMC المصغرة ---
-def apply_smc(df):
-    # تحديد Order Blocks (تبسيط: آخر شمعة هابطة قبل صعود قوي، والعكس)
-    df['OB_Buy'] = (df['Close'] > df['Open']) & (df['Close'].shift(1) < df['Open'].shift(1)) & (df['Volume'] > df['Volume'].rolling(5).mean())
-    df['OB_Sell'] = (df['Close'] < df['Open']) & (df['Close'].shift(1) > df['Open'].shift(1)) & (df['Volume'] > df['Volume'].rolling(5).mean())
-    return df
-
-df = apply_smc(data)
-
-# --- الرسم البياني التفاعلي ---
+# 3. بناء الرسم البياني الاحترافي
 fig = go.Figure()
 
-# 1. رسم الشموع اليابانية (ألوان كلاسيكية)
+# رسم الشموع اليابانية بألوان عالية التباين
 fig.add_trace(go.Candlestick(
     x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-    increasing_line_color='#26a69a', decreasing_line_color='#ef5350',
-    name="السعر الحالي"
+    increasing_line_color='#00ffcc', decreasing_line_color='#ff3366',
+    name="حركة السعر"
 ))
 
-# 2. رسم مناطق الشراء (Demand/Order Blocks) باللون الأخضر الشفاف
-buy_zones = df[df['OB_Buy']].tail(3) # آخر 3 مناطق شراء
-for index, row in buy_zones.iterrows():
-    fig.add_shape(type="rect", x0=index, x1=df.index[-1], y0=row['Low'], y1=row['High'],
-                  fillcolor="rgba(38, 166, 154, 0.2)", line_width=0, name="منطقة شراء")
+# إضافة منطقة البيع (Supply/Order Block) - بالأحمر
+fig.add_hrect(y0=top_z - 0.0007, y1=top_z, fillcolor="#ff3366", opacity=0.3, line_width=0)
+fig.add_annotation(x=df.index[-5], y=top_z, text="📉 منطقة بيع (SMC)", showarrow=False, 
+                   font=dict(size=20, color="#ff3366"), bgcolor="black")
 
-# 3. رسم مناطق البيع (Supply/Order Blocks) باللون الأحمر الشفاف
-sell_zones = df[df['OB_Sell']].tail(3) # آخر 3 مناطق بيع
-for index, row in sell_zones.iterrows():
-    fig.add_shape(type="rect", x0=index, x1=df.index[-1], y0=row['Low'], y1=row['High'],
-                  fillcolor="rgba(239, 83, 80, 0.2)", line_width=0, name="منطقة بيع")
+# إضافة منطقة الشراء (Demand/Order Block) - بالأخضر
+fig.add_hrect(y0=bottom_z, y1=bottom_z + 0.0007, fillcolor="#00ffcc", opacity=0.3, line_width=0)
+fig.add_annotation(x=df.index[-5], y=bottom_z, text="📈 منطقة شراء (SMC)", showarrow=False, 
+                   font=dict(size=20, color="#00ffcc"), bgcolor="black")
 
-fig.update_layout(height=700, template="plotly_dark", xaxis_rangeslider_visible=False,
-                  title=f"تحليل تدفق السيولة لـ {pair}", yaxis_title="السعر")
+# تحديد ورسم كسر الهيكل (BOS) - خطوط أفقية متقطعة
+last_peak = df[df['Peak']]['High'].iloc[-2] if len(df[df['Peak']]) > 1 else top_z
+if current_price > last_peak:
+    fig.add_hline(y=last_peak, line_dash="dash", line_color="white", line_width=2)
+    fig.add_annotation(x=df.index[10], y=last_peak, text="BOS (كسر هيكل صاعد)", font=dict(color="white", size=14))
 
-# --- العرض في التطبيق ---
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.plotly_chart(fig, use_container_width=True)
+# 4. تحسينات الواجهة والخطوط (UI/UX)
+fig.update_layout(
+    title=dict(
+        text=f"📊 تحليل SMC لـ {pair} | السعر: {current_price:.5f}",
+        font=dict(size=28, color="#00ffcc")
+    ),
+    template="plotly_dark",
+    height=800,
+    yaxis=dict(
+        tickfont=dict(size=18, color="yellow"),
+        gridcolor="#222222",
+        side="right" # وضع السعر على اليمين كما في منصات التداول
+    ),
+    xaxis=dict(tickfont=dict(size=16), gridcolor="#222222"),
+    paper_bgcolor="#0a0a0a",
+    plot_bgcolor="#0a0a0a",
+    margin=dict(l=20, r=20, t=60, b=20)
+)
 
-with col2:
-    st.subheader("💡 حالة السوق")
-    last_price = df['Close'].iloc[-1]
-    st.metric("السعر الحالي", f"{last_price:.5f}")
-    
-    if not buy_zones.empty and last_price <= buy_zones['High'].iloc[-1]:
-        st.success("السعر حالياً في منطقة شراء (Demand)")
-    elif not sell_zones.empty and last_price >= sell_zones['Low'].iloc[-1]:
-        st.error("السعر حالياً في منطقة بيع (Supply)")
-    else:
-        st.info("السعر في منطقة تعادل (Wait for OB)")
+fig.show()
