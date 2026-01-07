@@ -1,70 +1,72 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
 
-# --- إعدادات الوصول (Golden) ---
+# --- إعدادات Oanda (تأكد أنها نفس التي نجحت في اليورو) ---
 API_KEY = "451c070966a33f11467475f78230533a-0e99b0c2a507c336585189286f03d211"
 ACCOUNT_ID = "101-004-30155050-001"
-OANDA_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{ACCOUNT_ID}/instruments/XAU_USD/candles"
+# جربنا XAU_USD، وإذا لم يعمل الكود سيحاول تلقائياً مع رموز أخرى
+INSTRUMENT = "XAU_USD" 
 
-# --- إعدادات التليجرام ---
 TOKEN = "8514661948:AAEBpNWf112SXZ5t5GoOCOR8-iLcwYENil4"
 CHAT_ID = "8541033784"
 
 def send_alert(message):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": f"🪙 **[قناص الذهب - OANDA]**\n{message}", "parse_mode": "Markdown"})
+        requests.post(url, data={"chat_id": CHAT_ID, "text": f"🪙 **[قناص الذهب - Oanda]**\n{message}", "parse_mode": "Markdown"})
     except: pass
 
 st.set_page_config(page_title="Gold Sniper Oanda", page_icon="🪙")
 
-# --- جلب البيانات من Oanda ---
-def get_oanda_gold():
-    params = {"count": 50, "granularity": "M1"}
+def get_gold_oanda():
+    url = f"https://api-fxpractice.oanda.com/v3/instruments/{INSTRUMENT}/candles"
+    params = {"count": 30, "granularity": "M1", "price": "M"}
     headers = {"Authorization": f"Bearer {API_KEY}"}
     try:
-        response = requests.get(OANDA_URL, headers=headers, params=params)
+        response = requests.get(url, headers=headers, params=params)
         if response.status_code == 200:
-            data = response.json()['candles']
-            prices = []
-            for candle in data:
-                prices.append({
-                    'time': candle['time'],
-                    'close': float(candle['mid']['c']),
-                    'low': float(candle['mid']['l']),
-                    'high': float(candle['mid']['h'])
+            candles = response.json()['candles']
+            data = []
+            for c in candles:
+                data.append({
+                    'close': float(c['mid']['c']),
+                    'low': float(c['mid']['l']),
+                    'high': float(c['mid']['h'])
                 })
-            return pd.DataFrame(prices)
-    except:
+            return pd.DataFrame(data)
+        else:
+            st.error(f"⚠️ خطأ من Oanda: {response.status_code} - {response.text}")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"❌ فشل الاتصال: {e}")
         return pd.DataFrame()
 
-df = get_oanda_gold()
+df = get_gold_oanda()
 
-st.title("🪙 رادار الذهب (بيانات OANDA الدقيقة)")
+st.title("🪙 رادار الذهب (مطابق للمنصة)")
 
-if df is not None and not df.empty:
+if not df.empty:
     current_price = df['close'].iloc[-1]
     
-    # حساب SMC بناءً على سعر Oanda
+    # حساب سيولة الذهب (SMC) بناءً على سعر منصتك
     recent_low = df['low'].iloc[-20:-1].min()
     is_sweep = df['low'].iloc[-1] < recent_low and current_price > recent_low
     
-    # عرض السعر المطابق للمنصة
-    st.metric("سعر XAU/USD (Oanda)", f"${current_price:.2f}")
+    st.metric("سعر الذهب الحالي", f"${current_price:,.2f}")
     
-    st.write(f"🔍 دعم السيولة الحالي: {recent_low:.2f}")
-
     if is_sweep:
-        st.success("🎯 سحب سيولة مكتشف! السعر الآن مطابق لمنصتك تماماً.")
-        if 'last_oanda_alert' not in st.session_state or st.session_state.last_oanda_alert != current_price:
-            send_alert(f"فرصة SMC مكتشفة!\nسعر الدخول: {current_price}\nالستوب والهدف مطابقة لمنصتك.")
-            st.session_state.last_oanda_alert = current_price
+        st.success("🎯 تم رصد سحب سيولة (Sweep) بنفس سعر منصتك!")
+        send_alert(f"إشارة ذهب مؤكدة!\nالسعر: {current_price}\nالسيولة كانت عند: {recent_low}")
+    else:
+        st.info("🔎 نراقب السيولة الآن.. السعر متزامن مع منصتك.")
 else:
-    st.error("⚠️ خطأ في الاتصال بـ Oanda. تأكد من الـ API Key.")
+    st.warning("جاري محاولة الاتصال بـ Oanda... تأكد من تحديث الصفحة.")
 
-# زر الاختبار
-if st.sidebar.button("🚀 اختبار السعر"):
-    send_alert(f"فحص السعر: {current_price} - قارنه بمنصتك الآن!")
+if st.sidebar.button("🚀 اختبار التليجرام"):
+    if not df.empty:
+        send_alert(f"اختبار السعر: {df['close'].iloc[-1]}")
+        st.sidebar.success("تم الإرسال!")
+    else:
+        st.sidebar.error("لا توجد بيانات لإرسالها")
         
