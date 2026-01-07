@@ -1,94 +1,113 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import time
+import requests
+from datetime import datetime
 
-# --- إعدادات الواجهة (Professional Dark Bootstrap) ---
-st.set_page_config(page_title="Gold Sniper Terminal", page_icon="🏆", layout="wide")
+# --- إعدادات التليجرام ---
+TOKEN = "8514661948:AAEBpNWf112SXZ5t5GoOCOR8-iLcwYENil4"
+CHAT_ID = "8541033784"
+
+def send_alert(message):
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": f"🏆 **[GOLD ELITE TERMINAL]**\n{message}", "parse_mode": "Markdown"})
+    except: pass
+
+# --- تصميم الواجهة الاحترافي (Bootstrap 5 Custom) ---
+st.set_page_config(page_title="Gold Elite Sniper", page_icon="🏆", layout="wide")
 
 st.markdown("""
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #0b0e11 !important; color: #ffffff; }
-        .stApp { background-color: #0b0e11; }
-        .terminal-card { 
-            background: #161a1e; border: 1px solid #30363d; border-radius: 15px; 
-            padding: 40px; margin-top: 30px; text-align: center;
-            box-shadow: 0 15px 50px rgba(0,0,0,0.7);
+        body { background-color: #0b0e14 !important; color: #e0e0e0; }
+        .stApp { background-color: #0b0e14; }
+        .card-custom { 
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px; 
+            padding: 25px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         }
-        .price-text { font-family: 'Courier New', monospace; font-size: 6rem; font-weight: 900; color: #f0b90b; }
-        .sync-badge { background: #238636; color: white; padding: 5px 15px; border-radius: 50px; font-size: 0.8rem; }
+        .price-text { font-family: 'JetBrains Mono', monospace; font-size: 4.5rem; font-weight: bold; color: #ffd700; }
+        .indicator-badge { border-radius: 50px; padding: 5px 15px; font-size: 0.75rem; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- إدارة الذاكرة (لحل مشكلة القفز السعري) ---
-if 'calibration' not in st.session_state:
-    st.session_state.calibration = 0.0
+# --- محرك البيانات (جلب السعر الفوري الحقيقي) ---
+@st.cache_data(ttl=2)
+def get_spot_gold():
+    try:
+        # الرمز XAUUSD=X هو السعر الفوري (Spot) الذي يطابق Oanda تماماً
+        ticker = yf.Ticker("XAUUSD=X")
+        df = ticker.history(period="1d", interval="1m")
+        return df
+    except: return pd.DataFrame()
 
-# --- محرك البيانات الفولاذي (Anti-Crash Engine) ---
-def get_gold_price():
-    # محاولة جلب البيانات 3 مرات قبل الاستسلام
-    for _ in range(3):
-        try:
-            # XAUUSD=X هو الرمز الأكثر استقراراً في العالم حالياً
-            data = yf.download("XAUUSD=X", period="1d", interval="1m", progress=False)
-            if not data.empty:
-                return data
-        except:
-            time.sleep(1) # انتظر ثانية وحاول مجدداً
-    return None
+# --- الذاكرة الدائمة للمعايرة (Session State) ---
+if 'gold_offset' not in st.session_state:
+    st.session_state.gold_offset = 0.0
 
-# --- التحكم الجانبي ---
+# --- القائمة الجانبية ---
 with st.sidebar:
-    st.header("⚙️ معايرة المنصة")
-    st.info("اضبط هذا الرقم مرة واحدة ليطابق ميتاتريدر تماماً.")
-    new_offset = st.number_input("الفرق (Offset)", value=st.session_state.calibration, step=0.01)
-    if new_offset != st.session_state.calibration:
-        st.session_state.calibration = new_offset
+    st.markdown("### ⚙️ Calibration Center")
+    new_offset = st.number_input("MT5 Sync Offset", value=st.session_state.gold_offset, step=0.01, format="%.2f")
+    if new_offset != st.session_state.gold_offset:
+        st.session_state.gold_offset = new_offset
         st.rerun()
+    st.markdown("---")
+    if st.button("🚀 Test Connection"):
+        send_alert("System calibrated. Listening for SMC signals.")
 
-# --- العرض الرئيسي ---
-data = get_gold_price()
+# --- المعالجة والعرض ---
+df = get_spot_gold()
 
-if data is not None:
-    # معالجة السعر وضمان أنه رقم
-    raw_val = float(data['Close'].iloc[-1])
-    final_price = round(raw_val + st.session_state.calibration, 2)
+if not df.empty and len(df) > 10:
+    # استخراج السعر وتطبيق المعايرة
+    current_raw = float(df['Close'].iloc[-1])
+    final_price = round(current_raw + st.session_state.gold_offset, 2)
     
-    # حساب السيولة
-    low_val = float(data['Low'].iloc[-10:-1].min())
-    liquidity = round(low_val + st.session_state.calibration, 2)
+    # حساب سيولة SSL (SMC Logic)
+    lows = df['Low'].iloc[-20:-1]
+    raw_liquidity = float(lows.min())
+    synced_liquidity = round(raw_liquidity + st.session_state.gold_offset, 2)
+    
+    # كشف سحب السيولة
+    is_sweep = (float(df['Low'].iloc[-1]) + st.session_state.gold_offset) < synced_liquidity and final_price > synced_liquidity
 
+    # --- واجهة Bootstrap ---
     st.markdown(f"""
-        <div class="container">
-            <div class="terminal-card">
-                <span class="sync-badge">SERVER: CONNECTED</span>
-                <h4 class="text-muted mt-4">XAU/USD SPOT</h4>
-                <div class="price-text">${final_price:,.2f}</div>
-                <div class="row mt-5">
-                    <div class="col-6 border-end border-secondary">
-                        <small class="text-muted">INSTITUTIONAL SUPPORT</small>
-                        <h2 class="text-info">${liquidity:,.2f}</h2>
-                    </div>
-                    <div class="col-6">
-                        <small class="text-muted">MT5 OFFSET</small>
-                        <h2 class="text-warning">{st.session_state.calibration:+.2f}</h2>
-                    </div>
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card-custom">
+                    <span class="indicator-badge bg-success text-white">LIVE ECN FEED</span>
+                    <h5 class="text-muted mt-2">XAU/USD SPOT GOLD</h5>
+                    <div class="price-text">${final_price:,.2f}</div>
+                    <p class="text-muted small">Synchronized with MT5 Bridge Platform</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card-custom h-100">
+                    <span class="indicator-badge bg-primary text-white">SMC ENGINE</span>
+                    <h6 class="mt-3">Liquidity Target (SSL)</h6>
+                    <h2 class="text-info mt-2">${synced_liquidity:,.2f}</h2>
+                    <p class="text-muted small">Institutional Stop-Loss Cluster</p>
                 </div>
             </div>
         </div>
+        
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="card-custom text-center" style="border-top: 4px solid {'#ff4b4b' if is_sweep else '#ffd700'}">
+                    <h4>Market Sentiment</h4>
+                    <p class="lead">{'🚨 LIQUIDITY PURGE DETECTED - WAIT FOR BULLISH REJECTION' if is_sweep else '🔍 Scanning for institutional footprints...'}</p>
+                </div>
+            </div>
+        </div>
+    </div>
     """, unsafe_allow_html=True)
 
-    # تحديث تلقائي كل 5 ثوانٍ
-    time.sleep(5)
-    st.rerun()
+    if is_sweep:
+        st.balloons()
+        send_alert(f"🎯 SMC SIGNAL\nGold swept liquidity at {synced_liquidity}.\nCurrent Price: {final_price}")
+
 else:
-    # واجهة انتظار احترافية بدلاً من الخطأ الأحمر
-    st.markdown("""
-        <div class="text-center" style="margin-top: 200px;">
-            <div class="spinner-border text-warning" role="status" style="width: 4rem; height: 4rem;"></div>
-            <h2 class="mt-4">جاري إعادة الاتصال بمزود الأسعار...</h2>
-            <p class="text-muted">يرجى التأكد من استقرار الإنترنت لديك.</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
+    st.markdown("<div class='text-center mt-5'><h4>Connecting to MT5 Pricing Server...</h4></div>", unsafe_allow_html=True)
