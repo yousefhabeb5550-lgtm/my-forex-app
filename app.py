@@ -13,81 +13,86 @@ CHAT_ID = "8541033784"
 def send_gold_alert(message):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"})
+        full_msg = f"🪙 **[قناص الذهب SMC]**\n{message}"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": full_msg, "parse_mode": "Markdown"})
     except: pass
 
-# --- إعدادات الذهب (إدارة المخاطر) ---
-GOLD_SYMBOL = "GC=F" # عقود الذهب الآجلة (أكثر دقة لـ SMC)
-SL_POINTS = 0.50     # 50 نقطة ذهب
-TP_POINTS = 1.50     # 150 نقطة ذهب (1:3)
+# --- إعدادات الذهب (XAU/USD) ---
+GOLD_SYMBOL = "XAUUSD=X" 
+SL_POINTS = 0.50  # 50 نقطة (أمان الذهب)
+TP_POINTS = 1.50  # 150 نقطة (هدف 1:3)
 
-st.set_page_config(page_title="Gold Sniper V1", layout="wide")
+st.set_page_config(page_title="Gold Sniper SMC", page_icon="🪙", layout="wide")
 
-# --- منطق الاستخراج الفني (SMC) ---
-def get_gold_data():
-    df = yf.Ticker(GOLD_SYMBOL).history(period="1d", interval="1m")
-    return df
+# --- جلب ومعالجة البيانات ---
+def get_data():
+    try:
+        # جلب بيانات دقيقة واحدة لدقة الـ FVG والـ Sweep
+        df = yf.Ticker(GOLD_SYMBOL).history(period="1d", interval="1m")
+        return df
+    except:
+        return pd.DataFrame()
 
-df = get_gold_data()
+df = get_data()
 
 if not df.empty:
+    # حساب المؤشرات الفنية
     price = round(df['Close'].iloc[-1], 2)
-    # 1. تحديد السيولة (أعلى وأدنى نقطة في آخر 20 دقيقة)
-    recent_high = df['High'].iloc[-20:-1].max()
+    prev_close = df['Close'].iloc[-2]
+    
+    # 1. رصد سحب السيولة (Liquidity Sweep) - درس الفيديو 1
     recent_low = df['Low'].iloc[-20:-1].min()
+    is_sweep = df['Low'].iloc[-1] < recent_low and price > recent_low
     
-    # 2. فحص سحب السيولة (Sweep)
-    is_liquidity_sweep_buy = df['Low'].iloc[-1] < recent_low and df['Close'].iloc[-1] > recent_low
+    # 2. رصد الفجوة السعرية (FVG) - درس الفيديو 2
+    # نتحقق من وجود فجوة بين شمعة اليوم وشمعة ما قبل الانفجار
+    has_fvg = df['Low'].iloc[-1] > df['High'].iloc[-3]
     
-    # 3. فحص الفجوة السعرية (FVG)
-    # شمعة 1 (قبل السابقة) و شمعة 3 (الحالية)
-    fvg_bullish = df['Low'].iloc[-1] > df['High'].iloc[-3]
-    
-    # 4. توقيت نيويورك (Silver Bullet)
-    libya_tz = pytz.timezone('Africa/Tripoli')
-    now_hour = datetime.now(libya_tz).hour
-    is_silver_bullet_time = (15 <= now_hour <= 16) # من 3 لـ 4 عصراً
+    # 3. فلتر الوقت (توقيت نيويورك) - درس الفيديو 3
+    tz = pytz.timezone('Africa/Tripoli')
+    now_hour = datetime.now(tz).hour
+    is_silver_bullet = (15 <= now_hour <= 16) # من 3 لـ 4 عصراً
 
-    # --- منطق اتخاذ القرار ---
-    if is_liquidity_sweep_buy and fvg_bullish:
+    # --- منطق الإشارة الذكية ---
+    if is_sweep and has_fvg:
         entry = price
         sl = entry - SL_POINTS
         tp = entry + TP_POINTS
         
-        status = "🔥 إشارة SILVER BULLET" if is_silver_bullet_time else "🪙 قنص ذهب عالي الجودة"
-        
-        msg = (f"{status}\n\n"
-               f"📊 الأداة: GOLD (XAU/USD)\n"
-               f"⚡️ النوع: BUY (SMC Logic)\n"
-               f"🎯 الدخول: {entry}\n"
+        msg = (f"🚀 **فرصة قنص ذهب مؤكدة**\n\n"
+               f"💰 سعر الدخول: {entry}\n"
                f"🛑 الستوب: {sl}\n"
                f"✅ الهدف: {tp}\n\n"
-               f"🛡️ التكتيك: سحب سيولة + فجوة سعرية (FVG)")
+               f"📊 الفلتر: سحب سيولة + FVG اكتملت\n"
+               f"⏰ التوقيت: {'Silver Bullet نشط 🔥' if is_silver_bullet else 'خارج الذروة'}")
         
-        # لمنع تكرار الإرسال في نفس الدقيقة
-        if 'last_gold_time' not in st.session_state or st.session_state.last_gold_time != df.index[-1]:
+        # منع التكرار
+        if 'last_gold_trade' not in st.session_state or st.session_state.last_gold_trade != price:
             send_gold_alert(msg)
-            st.session_state.last_gold_time = df.index[-1]
+            st.session_state.last_gold_trade = price
 
-    # --- واجهة المنصة ---
-    st.title("🪙 منصة قنص الذهب (SMC Edition)")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("سعر أونصة الذهب", f"${price}")
-    c2.metric("حالة السيولة", "سحب سيولة (Sweep) 🚨" if is_liquidity_sweep_buy else "مستقرة")
-    c3.metric("توقيت نيويورك", "نشط ⚡️" if is_silver_bullet_time else "خامل")
-
-    st.write(f"🔍 **أقرب سيولة شرائية (BSL):** {recent_high}")
-    st.write(f"🔍 **أقرب سيولة بيعية (SSL):** {recent_low}")
+    # --- واجهة المنصة الاحترافية ---
+    st.title("🪙 رادار الذهب - استراتيجية الأموال الذكية (SMC)")
     
-    if fvg_bullish:
-        st.success("✅ تم اكتشاف فجوة سعرية (FVG) - زخم مؤسساتي قوي!")
-    
-# --- إضافة زر الاختبار في القائمة الجانبية ---
-st.sidebar.title("🛠️ إعدادات القناص")
-if st.sidebar.button("🚀 اختبار اتصال التليجرام"):
-    send_gold_alert("✅ فحص الاتصال ناجح! منصة الذهب متصلة وجاهزة للصيد.")
-    st.sidebar.success("تم إرسال رسالة الاختبار بنجاح!")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("السعر الحالي (XAU/USD)", f"${price}")
+    col2.metric("حالة السيولة", "سحب سيولة ✅" if is_sweep else "انتظار كسر")
+    col3.metric("توقيت نيويورك", "نشط ⚡️" if is_silver_bullet else "خامل")
 
-st.sidebar.markdown("---")
-st.sidebar.write("📌 **قاعدة الذهب:**")
-st.sidebar.info("انتظر سحب السيولة (Sweep) ثم ظهور الفجوة (FVG) قبل الدخول.")
+    st.markdown("---")
+    
+    # عرض حالة الفجوة السعرية
+    if has_fvg:
+        st.success("✅ تم اكتشاف فجوة سعرية (FVG) - الزخم الشرائي قوي جداً!")
+    else:
+        st.info("🕒 بانتظار تكون فجوة سعرية (FVG) لتأكيد الدخول المؤسساتي...")
+
+    # القائمة الجانبية
+    st.sidebar.header("🛠️ تحكم القناص")
+    if st.sidebar.button("🚀 اختبار اتصال التليجرام"):
+        send_gold_alert(f"فحص الاتصال ناجح! السعر الحالي في الرادار: {price}")
+        st.sidebar.success("تم الإرسال!")
+
+    st.sidebar.markdown("---")
+    st.sidebar.write(f"📍 أدنى سيولة مرصودة: {recent_low}")
+    
