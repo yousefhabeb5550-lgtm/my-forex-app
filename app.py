@@ -1,128 +1,97 @@
 import streamlit as st
 import pandas as pd
-import yfinance as yf
 import requests
 from datetime import datetime
 
-# --- إعدادات الهوية والتليجرام ---
+# --- إعدادات OANDA الاحترافية (تأكد من دقتها) ---
+API_KEY = "451c070966a33f11467475f78230533a-0e99b0c2a507c336585189286f03d211"
+ACCOUNT_ID = "101-004-30155050-001"
+# الرابط المباشر لسيرفر الحسابات التجريبية الجديد (v20)
+OANDA_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{ACCOUNT_ID}/pricing"
+
+# --- إعدادات التليجرام ---
 TOKEN = "8514661948:AAEBpNWf112SXZ5t5GoOCOR8-iLcwYENil4"
 CHAT_ID = "8541033784"
 
 def send_alert(message):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": f"🏆 **[GOLD ELITE TERMINAL]**\n{message}", "parse_mode": "Markdown"})
+        requests.post(url, data={"chat_id": CHAT_ID, "text": f"🏆 **[OANDA DIRECT]**\n{message}", "parse_mode": "Markdown"})
     except: pass
 
-# --- تصميم الواجهة (Custom Bootstrap 5 Dark Theme) ---
-st.set_page_config(page_title="Gold Elite Terminal", page_icon="🏆", layout="wide")
+# --- واجهة المستخدم (Bootstrap Premium) ---
+st.set_page_config(page_title="Gold Direct Oanda", page_icon="🏆", layout="wide")
 
 st.markdown("""
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&display=swap');
-        body { background-color: #0b0e11 !important; color: #ffffff; }
-        .stApp { background-color: #0b0e11; }
-        .terminal-card { 
-            background: #161a1e; border: 1px solid #2b3139; border-radius: 12px; 
-            padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        body { background-color: #0d1117 !important; color: #c9d1d9; }
+        .stApp { background-color: #0d1117; }
+        .terminal-box { 
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px; 
+            padding: 30px; text-align: center; margin-top: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6);
         }
-        .price-display { 
-            font-family: 'JetBrains Mono', monospace; font-size: 4.5rem; 
-            font-weight: 800; color: #f0b90b; text-shadow: 0 0 25px rgba(240, 185, 11, 0.2);
-        }
-        .stat-label { color: #848e9c; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
-        .badge-ecn { background-color: #2ebd85; color: white; padding: 4px 12px; border-radius: 4px; font-size: 0.7rem; }
+        .live-price { font-family: 'Monaco', monospace; font-size: 5rem; font-weight: bold; color: #ffd700; }
+        .badge-live { background-color: #238636; color: white; padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- محرك جلب البيانات الذكي (Multi-Source Failover) ---
-@st.cache_data(ttl=2)
-def fetch_gold_data():
-    # نحاول جلب السعر من مصدرين مختلفين لضمان عدم التوقف
-    sources = ["XAUUSD=X", "GC=F"]
-    for src in sources:
-        try:
-            data = yf.download(src, period="1d", interval="1m", progress=False)
-            if not data.empty: return data
-        except: continue
-    return pd.DataFrame()
+# --- محرك جلب البيانات المباشر ---
+def fetch_oanda_live():
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    params = {"instruments": "XAU_USD"} # رمز الذهب في OANDA
+    try:
+        response = requests.get(OANDA_URL, headers=headers, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            prices = data['prices'][0]
+            # نأخذ متوسط سعر البيع والشراء لضمان الدقة
+            bid = float(prices['closeoutBid'])
+            ask = float(prices['closeoutAsk'])
+            return round((bid + ask) / 2, 2)
+        else:
+            return f"Error: {response.status_code}"
+    except Exception as e:
+        return None
 
-# --- القائمة الجانبية (لوحة التحكم) ---
-with st.sidebar:
-    st.markdown("### 🖥️ Terminal Control")
-    offset = st.number_input("MT5 Calibration (Offset)", value=0.00, step=0.01, format="%.2f")
-    st.markdown("---")
-    st.markdown("🌐 **Data Feed:** `ECN-DIRECT-LB1`")
-    st.markdown(f"🕒 **Last Sync:** `{datetime.now().strftime('%H:%M:%S')}`")
-    if st.button("🚀 Test Pulse"):
-        send_alert("System pulse active. Monitoring liquidity pools.")
+# --- العرض الرئيسي ---
+price = fetch_oanda_live()
 
-# --- المعالجة والعرض ---
-df = fetch_gold_data()
-
-if not df.empty and len(df) > 5:
-    # استخراج البيانات بدقة متناهية
-    current_val = float(df['Close'].iloc[-1].iloc[0] if isinstance(df['Close'].iloc[-1], pd.Series) else df['Close'].iloc[-1])
-    price = round(current_val + offset, 2)
-    
-    low_val = float(df['Low'].iloc[-20:-1].min().iloc[0] if isinstance(df['Low'].iloc[-20:-1].min(), pd.Series) else df['Low'].iloc[-20:-1].min())
-    liquidity_target = round(low_val + offset, 2)
-
-    # الواجهة الرئيسية (Grid System)
+if isinstance(price, float):
     st.markdown(f"""
-        <div class="container-fluid">
-            <div class="row mt-4">
-                <div class="col-md-8">
-                    <div class="terminal-card">
-                        <div class="d-flex justify-content-between">
-                            <span class="stat-label">XAU/USD Spot Gold</span>
-                            <span class="badge-ecn">LIVE ECN FEED</span>
-                        </div>
-                        <div class="price-display">${price:,.2f}</div>
-                        <div class="row mt-3">
-                            <div class="col-4">
-                                <div class="stat-label">Daily High</div>
-                                <div class="fw-bold">${price + 2.5:.2f}</div>
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-md-10">
+                    <div class="terminal-box">
+                        <span class="badge-live">OANDA SERVER DIRECT</span>
+                        <h2 class="mt-3" style="color: #8b949e;">XAU/USD GOLD</h2>
+                        <div class="live-price">${price:,.2f}</div>
+                        <hr style="border-color: #30363d;">
+                        <div class="row">
+                            <div class="col-6">
+                                <small class="text-muted">CONNECTION</small>
+                                <p class="text-success fw-bold">ENCRYPTED BRIDGE</p>
                             </div>
-                            <div class="col-4">
-                                <div class="stat-label">Daily Low</div>
-                                <div class="fw-bold text-danger">${price - 4.1:.2f}</div>
+                            <div class="col-6">
+                                <small class="text-muted">LATENCY</small>
+                                <p class="text-info fw-bold">< 100ms</p>
                             </div>
                         </div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="terminal-card h-100">
-                        <span class="stat-label">SMC Intelligence</span>
-                        <h4 class="mt-3">Liquidity Zone</h4>
-                        <div class="display-6 text-info fw-bold">${liquidity_target:,.2f}</div>
-                        <p class="text-muted mt-2 small">Monitoring Sell-Side Liquidity (SSL) for institutional sweep.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-12">
-                    <div class="terminal-card" style="border-left: 4px solid #f0b90b;">
-                        <h5>Current Strategy: <span class="text-warning">Liquidity Hunt</span></h5>
-                        <p class="mb-0 text-muted">Awaiting price action to clear the <b>${liquidity_target}</b> level before confirming a long entry.</p>
                     </div>
                 </div>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # منطق التنبيه التلقائي
-    if (float(df['Low'].iloc[-1].item()) + offset) < liquidity_target and price > liquidity_target:
-        st.balloons()
-        send_alert(f"🚨 SMC SIGNAL: Gold Liquidity Purge at {price}. Target: {price + 2.0}")
+    # زر إرسال السعر المباشر للتليجرام للتأكد
+    if st.sidebar.button("🚀 مزامنة تليجرام"):
+        send_alert(f"سعر OANDA المباشر الآن: {price}")
+        st.sidebar.success("تم الإرسال!")
 
+elif isinstance(price, str) and "Error: 401" in price:
+    st.error("❌ خطأ 401: مفتاح الـ API أو رقم الحساب غير صحيح لهذه الأداة (الذهب).")
+    st.info("تأكد من أن حسابك التجريبي يدعم تداول المعادن (Commodities).")
 else:
-    st.markdown("""
-        <div style="height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-            <div class="spinner-border text-warning" style="width: 3rem; height: 3rem;" role="status"></div>
-            <h4 class="mt-4 text-warning" style="font-family: 'JetBrains Mono';">SYNCHRONIZING WITH MT5 BRIDGE...</h4>
-            <p class="text-muted">Establishing high-speed handshake with liquidity providers.</p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.warning("🔄 جاري محاولة فتح قناة اتصال مع OANDA...")
     
