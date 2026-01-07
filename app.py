@@ -1,72 +1,57 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import requests
 
-# --- إعدادات Oanda (تأكد أنها نفس التي نجحت في اليورو) ---
-API_KEY = "451c070966a33f11467475f78230533a-0e99b0c2a507c336585189286f03d211"
-ACCOUNT_ID = "101-004-30155050-001"
-# جربنا XAU_USD، وإذا لم يعمل الكود سيحاول تلقائياً مع رموز أخرى
-INSTRUMENT = "XAU_USD" 
-
+# --- إعدادات التليجرام ---
 TOKEN = "8514661948:AAEBpNWf112SXZ5t5GoOCOR8-iLcwYENil4"
 CHAT_ID = "8541033784"
 
 def send_alert(message):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": f"🪙 **[قناص الذهب - Oanda]**\n{message}", "parse_mode": "Markdown"})
+        requests.post(url, data={"chat_id": CHAT_ID, "text": f"🪙 **[قناص الذهب المطور]**\n{message}", "parse_mode": "Markdown"})
     except: pass
 
-st.set_page_config(page_title="Gold Sniper Oanda", page_icon="🪙")
+st.set_page_config(page_title="Gold Sniper Pro", page_icon="🪙")
 
-def get_gold_oanda():
-    url = f"https://api-fxpractice.oanda.com/v3/instruments/{INSTRUMENT}/candles"
-    params = {"count": 30, "granularity": "M1", "price": "M"}
-    headers = {"Authorization": f"Bearer {API_KEY}"}
+# --- جلب البيانات (حل مشكلة التطابق) ---
+@st.cache_data(ttl=15)
+def get_live_gold():
     try:
-        response = requests.get(url, headers=headers, params=params)
-        if response.status_code == 200:
-            candles = response.json()['candles']
-            data = []
-            for c in candles:
-                data.append({
-                    'close': float(c['mid']['c']),
-                    'low': float(c['mid']['l']),
-                    'high': float(c['mid']['h'])
-                })
-            return pd.DataFrame(data)
-        else:
-            st.error(f"⚠️ خطأ من Oanda: {response.status_code} - {response.text}")
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"❌ فشل الاتصال: {e}")
+        # الرمز =P يعطي السعر الفوري اللحظي الأكثر دقة
+        data = yf.download("XAUUSD=P", period="1d", interval="1m", progress=False)
+        if data.empty:
+            data = yf.download("GC=F", period="1d", interval="1m", progress=False)
+        return data
+    except:
         return pd.DataFrame()
 
-df = get_gold_oanda()
+df = get_live_gold()
 
-st.title("🪙 رادار الذهب (مطابق للمنصة)")
+st.title("🪙 رادار الذهب (مطابق لمنصتك)")
 
 if not df.empty:
-    current_price = df['close'].iloc[-1]
+    # الحصول على السعر الحالي
+    current_price = round(float(df['Close'].iloc[-1]), 2)
     
-    # حساب سيولة الذهب (SMC) بناءً على سعر منصتك
-    recent_low = df['low'].iloc[-20:-1].min()
-    is_sweep = df['low'].iloc[-1] < recent_low and current_price > recent_low
+    # حساب السيولة (SMC)
+    recent_low = float(df['Low'].iloc[-20:-1].min())
+    is_sweep = float(df['Low'].iloc[-1]) < recent_low and current_price > recent_low
     
-    st.metric("سعر الذهب الحالي", f"${current_price:,.2f}")
+    # عرض السعر الكبير
+    st.metric("سعر الذهب الحالي (XAU/USD)", f"${current_price}")
     
-    if is_sweep:
-        st.success("🎯 تم رصد سحب سيولة (Sweep) بنفس سعر منصتك!")
-        send_alert(f"إشارة ذهب مؤكدة!\nالسعر: {current_price}\nالسيولة كانت عند: {recent_low}")
-    else:
-        st.info("🔎 نراقب السيولة الآن.. السعر متزامن مع منصتك.")
-else:
-    st.warning("جاري محاولة الاتصال بـ Oanda... تأكد من تحديث الصفحة.")
+    # مقارنة بصرية للمستخدم
+    st.info(f"📍 دعم السيولة القريب: {recent_low}")
 
-if st.sidebar.button("🚀 اختبار التليجرام"):
-    if not df.empty:
-        send_alert(f"اختبار السعر: {df['close'].iloc[-1]}")
-        st.sidebar.success("تم الإرسال!")
-    else:
-        st.sidebar.error("لا توجد بيانات لإرسالها")
-        
+    if is_sweep:
+        st.success("🎯 سحب سيولة (Sweep) مكتشف الآن!")
+        send_alert(f"إشارة SMC مؤكدة!\nالسعر: {current_price}\nالستوب: {current_price - 0.50}")
+
+    # زر الاختبار في الجنب
+    if st.sidebar.button("🚀 اختبار تليجرام"):
+        send_alert(f"منصة الذهب تعمل! السعر اللحظي: {current_price}")
+        st.sidebar.success("تم إرسال الاختبار!")
+else:
+    st.error("⚠️ فشل جلب البيانات. يرجى إعادة تحميل الصفحة بعد ثوانٍ.")
